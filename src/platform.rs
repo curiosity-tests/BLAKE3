@@ -407,7 +407,6 @@ impl Platform {
 #[cfg(blake3_avx512_ffi)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn avx512_detected() -> bool {
     if cfg!(miri) {
         return false;
@@ -424,7 +423,6 @@ pub fn avx512_detected() -> bool {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn avx2_detected() -> bool {
     if cfg!(miri) {
         return false;
@@ -441,7 +439,6 @@ pub fn avx2_detected() -> bool {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn sse41_detected() -> bool {
     if cfg!(miri) {
         return false;
@@ -458,7 +455,6 @@ pub fn sse41_detected() -> bool {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(always)]
-#[allow(deprecated)] // TODO: revert this after https://github.com/RustCrypto/utils/pull/1515 is released
 pub fn sse2_detected() -> bool {
     if cfg!(miri) {
         return false;
