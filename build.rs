@@ -325,6 +325,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "blake3_avx2_rust",
         "blake3_avx512_ffi",
         "blake3_neon",
+        "blake3_neon_ffi",
+        "blake3_neon_rust",
         "blake3_wasm32_simd",
     ];
     for cfg_name in all_cfgs {
@@ -363,11 +365,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("The NEON implementation doesn't support big-endian ARM.")
     }
 
-    if (is_arm() && is_neon())
-        || (!is_no_neon() && !is_pure() && is_aarch64() && is_little_endian())
-    {
+    let neon_enabled = (is_arm() && is_neon())
+        || (!is_no_neon() && !is_pure() && is_aarch64() && is_little_endian());
+    if neon_enabled {
         println!("cargo::rustc-cfg=blake3_neon");
-        build_neon_c_intrinsics();
+        if is_aarch64() {
+            println!("cargo::rustc-cfg=blake3_neon_rust");
+        } else {
+            println!("cargo::rustc-cfg=blake3_neon_ffi");
+            build_neon_c_intrinsics();
+        }
     }
 
     if is_wasm32() && is_wasm32_simd() {
