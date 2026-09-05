@@ -1,6 +1,21 @@
 name: tests
 
 on:
+  workflow_dispatch:
+    inputs:
+      leg:
+        description: "baseline (uninstrumented) or instrumented (under chalk/curiosity)"
+        type: choice
+        options: [instrumented, baseline]
+        default: instrumented
+      profile:
+        description: "CrashOverride chalk profile"
+        type: string
+        default: curiosity-tests-racecar
+      racecar_run:
+        description: "racecar correlation token, echoed into the run name"
+        type: string
+        default: ""
   push:
     branches:
       - "*"
@@ -8,9 +23,18 @@ on:
   pull_request:
 
 env:
+  # The one variable that separates the arms: on baseline, action-checkout
+  # skips its Set up Chalk step entirely.
+  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
   BLAKE3_CI: "1"
   RUSTFLAGS: "-D warnings"
   RUST_BACKTRACE: "1"
+
+permissions:
+  contents: read
+  id-token: write
+
+run-name: "tests ${{ inputs.leg || 'push' }} ${{ inputs.racecar_run }}"
 
 jobs:
   library_tests:
@@ -19,17 +43,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [
-          { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" },
-          { "os": "ubuntu-24.04-arm", "toolchain": "aarch64-unknown-linux-gnu", "name": "Linux GNU (arm64)" },
-          { "os": "macOS-latest",     "toolchain": "aarch64-apple-darwin",      "name": "macOS" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-gnu",     "name": "Windows GNU" }
-        ]
+        target: [{ "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" }, { "os": "ubuntu-24.04-arm", "toolchain": "aarch64-unknown-linux-gnu", "name": "Linux GNU (arm64)" }]
         channel: ["stable", "beta", "nightly"]
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ format('{0}-{1}', matrix.channel, matrix.target.toolchain) }}
@@ -142,6 +172,10 @@ jobs:
       working-directory: ./c/blake3_c_rust_bindings
       env:
         CFLAGS: -DBLAKE3_NO_AVX512 -DBLAKE3_NO_AVX2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_SSE2
+    - name: cargo test C bindings SVE2
+      if: matrix.target.os == 'ubuntu-24.04-arm'
+      run: cargo test --features=sve2
+      working-directory: ./c/blake3_c_rust_bindings
     # Reference impl doc test.
     - name: reference impl doc test
       run: cargo test
@@ -153,14 +187,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macOS-latest", "windows-latest"]
+        os: ["ubuntu-latest"]
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
     # The current MSRV. This crate doesn't have an official MSRV policy,
     # but in practice we'll probably do what libc does:
     # https://github.com/rust-lang/libs-team/issues/72.
     # This test target is here so that we notice if we accidentally bump
     # the MSRV, but it's not a promise that we won't bump it.
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@1.85.1
     - run: cargo build --features=mmap,rayon,traits-preview,serde,zeroize
 
@@ -170,17 +216,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [
-          { "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" },
-          { "os": "ubuntu-24.04-arm", "toolchain": "aarch64-unknown-linux-gnu", "name": "Linux GNU (arm64)" },
-          { "os": "macOS-latest",     "toolchain": "aarch64-apple-darwin",      "name": "macOS" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-msvc",    "name": "Windows MSVC" },
-          { "os": "windows-latest",   "toolchain": "x86_64-pc-windows-gnu",     "name": "Windows GNU" }
-        ]
+        target: [{ "os": "ubuntu-latest",    "toolchain": "x86_64-unknown-linux-gnu",  "name": "Linux GNU" }, { "os": "ubuntu-24.04-arm", "toolchain": "aarch64-unknown-linux-gnu", "name": "Linux GNU (arm64)" }]
         channel: ["stable", "beta", "nightly"]
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ format('{0}-{1}', matrix.channel, matrix.target.toolchain) }}
@@ -214,7 +266,19 @@ jobs:
           - s390x-unknown-linux-gnu
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@stable
     - run: cargo install cross
     # Test the portable implementation on everything.
@@ -239,7 +303,19 @@ jobs:
     name: WASM tests
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-wasip1
@@ -267,7 +343,19 @@ jobs:
     name: cargo xwin test
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - run: docker run -v $(pwd):/io -w /io messense/cargo-xwin cargo xwin test --target x86_64-pc-windows-msvc --features=mmap,rayon,traits-preview,serde,zeroize
 
   # Currently only on x86.
@@ -280,7 +368,19 @@ jobs:
         use_tbb: ["OFF", "ON"]
         simd: ["x86-intrinsics", "amd64-asm"]
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - run: |
         sudo apt-get update
         sudo apt-get install ninja-build libtbb-dev libtbb12
@@ -326,7 +426,19 @@ jobs:
         shared_libs: ["OFF", "ON"]
         stdlib: ["libc++", "libstdc++"]
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - name: update packages
       run: |
         sudo apt-get update
@@ -346,27 +458,23 @@ jobs:
       run: gcc -O3 -o ${{ github.workspace }}/target/bin/blake3-example-tbb c/example_tbb.c $(pkg-config --cflags --libs libblake3)
 
   # Note that this jobs builds AArch64 binaries from an x86_64 host.
-  build_apple_silicon:
-    name: build for Apple Silicon
-    runs-on: macOS-latest
-    strategy:
-      fail-fast: false
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: aarch64-apple-darwin
-    - name: build blake3
-      run: cargo build --target aarch64-apple-darwin
-    - name: build b3sum
-      run: cargo build --target aarch64-apple-darwin
-      working-directory: ./b3sum
-
   build_tinycc:
     name: build with the Tiny C Compiler
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - name: install TCC
       run: sudo apt-get install -y tcc
     - name: compile
@@ -383,7 +491,19 @@ jobs:
     name: "compile and test with GCC 5.4"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: addnab/docker-run-action@v3
       with:
         image: gcc:5.4
@@ -403,7 +523,7 @@ jobs:
       matrix:
         cmakeVersion: [latest]
         ninjaVersion: [latest]
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        os: [ubuntu-latest]
         toolchain: [
           { cc: cl, cxx: cl },
           { cc: clang, cxx: clang++ },
@@ -412,22 +532,24 @@ jobs:
         ]
         use_tbb: [OFF, ON]
         exclude:
-          - os: macOS-latest
-            toolchain: { cc: cl, cxx: cl }
-          - os: macOS-latest
-            toolchain: { cc: clang-cl, cxx: clang-cl }
           - os: ubuntu-latest
             toolchain: { cc: cl, cxx: cl }
           - os: ubuntu-latest
             toolchain: { cc: clang-cl, cxx: clang-cl }
-          - os: windows-latest
-            toolchain: { cc: clang, cxx: clang++ }
-            use_tbb: ON
-          - os: windows-latest
-            toolchain: { cc: gcc, cxx: g++ }
-            use_tbb: ON
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
       - uses: lukka/get-cmake@5f6e04f5267c8133f1273bf2103583fc72c46b17
         with:
           cmakeVersion: ${{ matrix.cmakeVersion }}
@@ -452,7 +574,19 @@ jobs:
     name: CMake 3.9.6 ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
       - uses: lukka/get-cmake@5f6e04f5267c8133f1273bf2103583fc72c46b17
         with:
           cmakeVersion: 3.9.6
@@ -469,7 +603,19 @@ jobs:
     name: Miri smoketest
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@nightly
       with:
         components: miri
@@ -484,9 +630,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macOS-latest"]
+        os: ["ubuntu-latest"]
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - uses: dtolnay/rust-toolchain@stable
     - name: install TBB
       if: matrix.os == 'ubuntu-latest'
